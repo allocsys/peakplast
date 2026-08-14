@@ -34,15 +34,32 @@
  */
 
 // ---------------------------------------------------------------------------
-// Constants
+// Constants — extracted to src/constants.js (modularization step 1, see
+// PLAN.md). Imported here for backward compatibility during the incremental
+// split; call sites throughout this file are unchanged.
 // ---------------------------------------------------------------------------
 
-const BUSINESS_TYPES = ['سوپرمارکت', 'میوه و تره‌بار', 'آرایشی بهداشتی', 'عمده‌فروشی', 'سایر'];
-const SIZES = [1, 2, 3, 4, 5];
-const PRESET_WEIGHTS = [1, 5, 10]; // quick-add buttons, in kg — tap repeatedly to build up a total
-const PAGE_SIZE = 5;
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24h for admin sessions
-const TG_STATE_TTL_MS = 60 * 60 * 1000; // 1h for stale conversation state
+import {
+  BUSINESS_TYPES,
+  SIZES,
+  PRESET_WEIGHTS,
+  PAGE_SIZE,
+  SESSION_TTL_MS,
+  TG_STATE_TTL_MS,
+  GEMINI_MODELS,
+  ADMIN_LOGIN_MAX_ATTEMPTS,
+  ADMIN_LOGIN_BASE_LOCKOUT_MS,
+  ADMIN_LOGIN_MAX_LOCKOUT_MS,
+  ADDRESS_SIMILARITY_THRESHOLD,
+  CHAT_LOCK_TTL_MS,
+  CHAT_LOCK_POLL_MS,
+  CHAT_LOCK_MAX_WAIT_MS,
+  VOICE_FLOOD_WINDOW_MS,
+  VOICE_FLOOD_MAX,
+  ZARINPAL_REQUEST_URL,
+  ZARINPAL_VERIFY_URL,
+  ZARINPAL_STARTPAY_URL,
+} from './src/constants.js';
 
 // ---------------------------------------------------------------------------
 // Voice ordering (Gemini) — transcription + structured extraction, tested
