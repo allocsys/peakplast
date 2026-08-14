@@ -1005,9 +1005,9 @@ async function ensureSchema(env) {
 // rejected outright for a period that doubles with each additional failure
 // past the threshold (capped), until a correct password resets the counter.
 // ---------------------------------------------------------------------------
-const ADMIN_LOGIN_MAX_ATTEMPTS = 5;
-const ADMIN_LOGIN_BASE_LOCKOUT_MS = 60 * 1000; // 1 minute base, doubles per extra failure
-const ADMIN_LOGIN_MAX_LOCKOUT_MS = 30 * 60 * 1000; // cap at 30 minutes
+// ADMIN_LOGIN_MAX_ATTEMPTS / ADMIN_LOGIN_BASE_LOCKOUT_MS /
+// ADMIN_LOGIN_MAX_LOCKOUT_MS — see src/constants.js (moved in
+// modularization step 1).
 
 function adminLockRemainingMs(authRow) {
   try {
