@@ -1414,8 +1414,8 @@ async function withChatLock(env, chatId, fn) {
 // already holding that chat's lock (see handleWebhook), there's no race
 // between the read and the write here — a plain read-then-write is safe.
 // ---------------------------------------------------------------------------
-const VOICE_FLOOD_WINDOW_MS = 60 * 1000; // rolling window
-const VOICE_FLOOD_MAX = 5; // max voice messages per chat per window
+// VOICE_FLOOD_WINDOW_MS / VOICE_FLOOD_MAX — see src/constants.js (moved in
+// modularization step 1).
 
 // Returns { allowed: true } if this voice message may proceed, or
 // { allowed: false, retryAfterSec } if the chat has hit the cap and should
