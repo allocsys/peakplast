@@ -70,18 +70,8 @@ import {
 // on quota/rate-limit errors (429 / RESOURCE_EXHAUSTED).
 // ---------------------------------------------------------------------------
 
-// gemini-2.5-flash started returning 404 "no longer available" on 2026-07-09
-// (Google prematurely retired it ahead of its official Oct 16 2026 shutdown
-// date — a known bug on Google's side, confirmed via Workers Logs and the
-// Gemini API forums). Previously there was only ONE model string and no
-// fallback for this failure mode at all — API-key rotation only covers
-// 429/RESOURCE_EXHAUSTED, so a model-level 404 threw immediately on the
-// very first key, regardless of how many keys were configured. Now we try
-// a small ordered list of models, falling through to the next one on a
-// 404/NOT_FOUND (model retired/unavailable) in addition to quota errors,
-// so a single Google-side deprecation can't take voice ordering down
-// completely. First entry is the primary/preferred model.
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+// GEMINI_MODELS — see src/constants.js for the model list and the 404-
+// fallback rationale (moved there in modularization step 1).
 
 // Reads one or more Gemini API keys from secrets so a quota-exhausted key
 // automatically falls over to the next one. GEMINI_API_KEYS is a
