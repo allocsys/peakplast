@@ -27,10 +27,15 @@ once step 18 lands.
 
 ## Steps (do in order, check off as completed)
 
-- [ ] **1. `src/constants.js`** — `BUSINESS_TYPES`, `SIZES`, `PRESET_WEIGHTS`,
+- [x] **1. `src/constants.js`** — `BUSINESS_TYPES`, `SIZES`, `PRESET_WEIGHTS`,
       `PAGE_SIZE`, `SESSION_TTL_MS`, `TG_STATE_TTL_MS`, `GEMINI_MODELS`,
       `CHAT_LOCK_*`, `VOICE_FLOOD_*`, `ADDRESS_SIMILARITY_THRESHOLD`, Zarinpal URLs.
       Zero dependencies — pure constants, safest first step.
+      Done on branch `modularize/step-1-constants`: `src/constants.js` created
+      (commit `aa622fa`), `peakplast.js` now imports all of the above from it
+      instead of declaring them locally (commits `63a9250`, `e95e191`,
+      `5e2bbaf`, `8d712b5`, `7ea18ba`, `205c266`, `59f72e7`). Not yet merged
+      to main — pending review/deploy smoke test.
 
 - [ ] **2. `src/lib/crypto.js`** — `bufToHex`, `hexToBuf`, `pbkdf2Hash`, `randomHex`,
       `timingSafeEqual`. Zero dependencies.

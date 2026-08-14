@@ -1,0 +1,28 @@
+name = "peakplast"
+main = "peakplast.js"
+compatibility_date = "2026-08-01"
+
+# D1 database binding — replace database_id below with the actual ID from
+# `wrangler d1 list` (or the Cloudflare dashboard → Workers & Pages → D1).
+# database_name should match whatever you created via
+# `wrangler d1 create peakplast-db` (rename here to match if you used a
+# different name).
+[[d1_databases]]
+binding = "DB"
+database_name = "peakplast-db"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+# Secrets are NOT set here (wrangler.toml is committed to the repo) — set
+# them via `wrangler secret put <NAME>` instead:
+#   wrangler secret put BOT_TOKEN             # from @BotFather
+#   wrangler secret put WEBHOOK_SECRET        # any random string you choose
+#   wrangler secret put ZARINPAL_MERCHANT_ID  # optional — payment gateway
+#   wrangler secret put GEMINI_API_KEYS       # optional — voice ordering,
+#                                              # comma-separated if multiple
+
+# Optional: reconciles stuck-'pending' Zarinpal payments (see
+# reconcilePendingPayments in peakplast.js) even if a customer never made it
+# back to the /payment/verify redirect. Only useful if ZARINPAL_MERCHANT_ID
+# is set. Uncomment to enable (runs every 15 minutes):
+# [triggers]
+# crons = ["*/15 * * * *"]
