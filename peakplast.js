@@ -1152,9 +1152,8 @@ async function setSizePrice(env, size, pricePerKg) {
 // Zarinpal payment gateway
 // ---------------------------------------------------------------------------
 
-const ZARINPAL_REQUEST_URL = 'https://payment.zarinpal.com/pg/v4/payment/request.json';
-const ZARINPAL_VERIFY_URL = 'https://payment.zarinpal.com/pg/v4/payment/verify.json';
-const ZARINPAL_STARTPAY_URL = 'https://payment.zarinpal.com/pg/StartPay/';
+// ZARINPAL_REQUEST_URL / ZARINPAL_VERIFY_URL / ZARINPAL_STARTPAY_URL — see
+// src/constants.js (moved in modularization step 1).
 
 // Creates a Zarinpal payment session for an order and returns a clickable
 // pay URL, or null if it couldn't be created (missing merchant id, amount
