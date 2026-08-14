@@ -1984,10 +1984,8 @@ function hubAddressEntryKeyboard() {
   };
 }
 
-// Default similarity threshold for the automatic duplicate-catch confirm
-// (see findSimilarAddresses below). Proposed 2026-07-11, not yet explicitly
-// confirmed by the user — reasonable default, revisit if it misfires.
-const ADDRESS_SIMILARITY_THRESHOLD = 0.6;
+// ADDRESS_SIMILARITY_THRESHOLD — see src/constants.js (moved in
+// modularization step 1).
 
 // Admin-only helper: scores every saved address against addressText by
 // Jaccard token overlap (|intersection|/|union| of normalized word sets),
