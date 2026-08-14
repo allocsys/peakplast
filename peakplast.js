@@ -1356,9 +1356,8 @@ async function clearTgState(env, chatId) {
 // is a single atomic statement: the row is only taken over if it doesn't
 // exist yet OR its previous holder's lock has already expired (in case a
 // prior invocation crashed without releasing).
-const CHAT_LOCK_TTL_MS = 20000; // generous vs. the ~3s Gemini call this guards against
-const CHAT_LOCK_POLL_MS = 350;
-const CHAT_LOCK_MAX_WAIT_MS = 8000; // give up and let the user know rather than hang the request
+// CHAT_LOCK_TTL_MS / CHAT_LOCK_POLL_MS / CHAT_LOCK_MAX_WAIT_MS — see
+// src/constants.js (moved in modularization step 1).
 
 async function acquireChatLock(env, chatId) {
   const token = `chat_lock_${chatId}`;
