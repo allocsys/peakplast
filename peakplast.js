@@ -2248,6 +2248,138 @@ async function handleWebhook(request, env) {
   return new Response('ok');
 }
 
+// Shared by both hub-voice paths: an admin filling the "➕ مشتری جدید" hub
+// (origin: 'admin_add') and a customer self-registering via their very
+// first voice message (origin unset — see the unregistered-voice bootstrap
+// in handleMessage). Downloads + transcribes the voice note against
+// whatever the hub already knows, sanitizes it, and merges anything usable
+// into the hub state (fill-only-if-empty, same one-shot-fill philosophy as
+// the rest of admin voice registration), then re-renders the hub.
+//
+// The automatic "did you mean this saved address?" duplicate-match is kept
+// admin-only (state.origin === 'admin_add'): it fuzzy-matches against EVERY
+// customer's saved addresses, which is fine for an admin but would leak
+// another customer's address to a stranger self-registering by voice. For
+// self-registration the spoken address is accepted as-is instead.
+async function handleHubVoiceMessage(env, chatId, state, voiceFileId) {
+  let extraction;
+  try {
+    extraction = await transcribeAdminRegVoice(env, voiceFileId, state);
+  } catch (e) {
+    console.error('transcribeAdminRegVoice failed:', e && e.stack ? e.stack : e);
+    await sendMessage(
+      env,
+      chatId,
+      'پردازش پیام صوتی با خطا مواجه شد. لطفاً دوباره امتحان کنید یا اطلاعات را با دکمه‌های صفحه ثبت‌نام وارد کنید.'
+    );
+    return;
+  }
+
+  const areas = await getDeliveryAreas(env);
+  const clean = sanitizeAdminRegExtraction(extraction, areas);
+  if (!clean.transcript) {
+    await sendMessage(env, chatId, 'متوجه پیام صوتی نشدم. لطفاً دوباره واضح بگویید یا از دکمه‌ها استفاده کنید.');
+    return;
+  }
+  // Gemini flagged something ambiguous (e.g. an unclear name/size) —
+  // surface that instead of silently dropping it, so the sender knows to
+  // double-check the field rather than assuming it was heard correctly.
+  if (clean.clarification_needed) {
+    await sendMessage(env, chatId, `❓ ${clean.clarification_needed}`);
+  }
+
+  // Items: same accumulation machinery as the customer multi-item voice
+  // flow (mergeItemIntoList + foldPendingItem) — a size is a fixed
+  // 1-of-5 value, much less prone to mishearing than a name or phone
+  // number, so folding it as usual is fine here.
+  let itemsMerged = state.items || [];
+  for (const it of clean.items || []) itemsMerged = mergeItemIntoList(itemsMerged, it);
+  let newState = {
+    ...state,
+    items: itemsMerged,
+    pending_size: clean.size != null ? clean.size : (state.pending_size ?? null),
+    pending_weight: clean.weight_kg != null ? clean.weight_kg : (state.pending_weight ?? null),
+  };
+  newState = foldPendingItem(newState);
+
+  // Name/phone: fill-only-if-empty. Never overwrites an already-set hub
+  // field — this is what makes it a one-shot fill rather than a
+  // voice-driven correction, per the 2026-07-11 decision. first_name and
+  // last_name are independent — accept whichever one(s) came back, each
+  // still fill-only-if-currently-empty (e.g. "خانوم ابراهیمی" fills only
+  // last_name).
+  if (!newState.first_name && clean.first_name) {
+    newState.first_name = clean.first_name;
+  }
+  if (!newState.last_name && clean.last_name) {
+    newState.last_name = clean.last_name;
+  }
+  if (!newState.phone_number && clean.phone_number) {
+    newState.phone_number = clean.phone_number;
+  }
+  // shop_name: same fill-only-if-empty rule — the store's own name (e.g.
+  // "فجر" in "سوپرمارکت فجر"), separate from business_type.
+  if (!newState.shop_name && clean.shop_name) {
+    newState.shop_name = clean.shop_name;
+  }
+  // business_type: same fill-only-if-empty rule.
+  if (!newState.business_type && clean.business_type) {
+    newState.business_type = clean.business_type;
+  }
+  // area: same fill-only-if-empty rule, validated against the current
+  // delivery_areas setting inside sanitizeAdminRegExtraction above.
+  if (!newState.area && clean.area) {
+    newState.area = clean.area;
+  }
+
+  // Address: fill-only-if-empty. For admin_add only, this also runs through
+  // the same admin-only duplicate/similarity catch as typed entry before
+  // being accepted outright — reuses the existing address_dup_confirm step
+  // and addrdup:accept/reject callbacks verbatim, so accepting or rejecting
+  // the match returns to the hub with everything else (items/name/phone
+  // merged above) intact. Self-registration skips the cross-customer match
+  // entirely (see function comment above) and just accepts the address.
+  if (!newState.address && clean.address) {
+    if (state.origin === 'admin_add') {
+      const matches = await findSimilarAddresses(env, clean.address, {
+        threshold: ADDRESS_SIMILARITY_THRESHOLD,
+        limit: 1,
+      });
+      if (matches.length) {
+        const candidate = matches[0];
+        const dupState = {
+          ...newState,
+          step: 'address_dup_confirm',
+          dup_candidate_id: candidate.id,
+          dup_candidate_text: candidate.address,
+          pending_address: clean.address,
+        };
+        await setTgState(env, chatId, dupState);
+        await editMessageText(
+          env,
+          chatId,
+          state.wizard_msg_id,
+          `آیا منظور شما این آدرس است؟\n${escapeHtml(candidate.address)}`,
+          {
+            inline_keyboard: [
+              [
+                { text: '✅ بله همین است', callback_data: 'addrdup:accept' },
+                { text: '❌ خیر، جدید است', callback_data: 'addrdup:reject' },
+              ],
+              CANCEL_INLINE_ROW,
+            ],
+          }
+        );
+        return;
+      }
+    }
+    newState.address = clean.address;
+  }
+
+  const wizardMsgId = await renderHub(env, chatId, newState);
+  await setTgState(env, chatId, { ...newState, wizard_msg_id: wizardMsgId });
+}
+
 async function handleMessage(env, message) {
   const chatId = message.chat.id;
   const text = (message.text || '').trim();
@@ -2336,23 +2468,26 @@ async function handleMessage(env, message) {
     }
 
     const inVoiceOrderFlow = state.step === 'voice_order';
-    // Admin, sitting on the hub screen of a brand-new-customer registration
-    // (origin: 'admin_add') — voice fills whatever hub fields it confidently
-    // can (see the admin voice-registration block above for the full
-    // decision/behavior). Any OTHER hub sub-step (name/phone/address/
-    // business_type/size_select/etc. already open) is deliberately NOT
-    // included here, so it still falls through to the generic "finish this
-    // step first" handling below rather than being silently reinterpreted.
-    const inAdminRegHub = Boolean(state.hub_mode) && state.origin === 'admin_add' && state.step === 'hub';
+    // Sitting on the hub screen of a new-customer registration — either an
+    // admin's "➕ مشتری جدید" (origin: 'admin_add') or a customer
+    // self-registering (origin unset — see the unregistered-voice bootstrap
+    // below, which starts this same hub for a first-time voice message
+    // instead of just blocking it). Voice fills whatever hub fields it
+    // confidently can, via the shared handleHubVoiceMessage helper. Any
+    // OTHER hub sub-step (name/phone/address/business_type/size_select/etc.
+    // already open) is deliberately NOT included here, so it still falls
+    // through to the generic "finish this step first" handling below
+    // rather than being silently reinterpreted.
+    const inRegHub = Boolean(state.hub_mode) && state.step === 'hub';
 
     // Any other in-progress flow (registration wizard, button-driven order,
     // awaiting a receipt photo, etc.) still has to be finished first — voice
-    // ordering only interleaves with itself, and admin voice registration
+    // ordering only interleaves with itself, and hub voice registration
     // only interleaves with the hub screen itself. Re-show the actual
     // prompt/keyboard for that step (as a fresh message) rather than just
     // saying "use the buttons" and leaving the customer to hunt for a
     // message that may have scrolled out of view — that was the "stuck" bug.
-    if (!inVoiceOrderFlow && !inAdminRegHub && state.step && state.step !== 'idle') {
+    if (!inVoiceOrderFlow && !inRegHub && state.step && state.step !== 'idle') {
       const resent = await resendCurrentStepPrompt(env, chatId, state);
       await sendMessage(
         env,
@@ -2364,136 +2499,8 @@ async function handleMessage(env, message) {
       return;
     }
 
-    if (inAdminRegHub) {
-      let extraction;
-      try {
-        extraction = await transcribeAdminRegVoice(env, message.voice.file_id, state);
-      } catch (e) {
-        // Previously silent — this was the exact catch that fired for the
-        // 2026-07-11 ~22:2x UTC report ("processing failed" half a second
-        // after sending) with nothing logged to explain why. Log it now so
-        // the real cause (bad/missing GEMINI_API_KEY, Telegram getFile
-        // failure, Gemini error, etc.) is visible in Workers Logs instead
-        // of only ever seeing the generic user-facing message.
-        console.error('transcribeAdminRegVoice failed:', e && e.stack ? e.stack : e);
-        await sendMessage(
-          env,
-          chatId,
-          'پردازش پیام صوتی با خطا مواجه شد. لطفاً دوباره امتحان کنید یا اطلاعات را با دکمه‌های صفحه ثبت‌نام وارد کنید.'
-        );
-        return;
-      }
-
-      const areas = await getDeliveryAreas(env);
-      const clean = sanitizeAdminRegExtraction(extraction, areas);
-      if (!clean.transcript) {
-        await sendMessage(env, chatId, 'متوجه پیام صوتی نشدم. لطفاً دوباره واضح بگویید یا از دکمه‌ها استفاده کنید.');
-        return;
-      }
-      // Gemini flagged something ambiguous (e.g. an unclear name/size) —
-      // surface that to the admin instead of silently dropping it, so they
-      // know to double-check the field rather than assuming it was heard
-      // correctly.
-      if (clean.clarification_needed) {
-        await sendMessage(env, chatId, `❓ ${clean.clarification_needed}`);
-      }
-
-      // Items: same accumulation machinery as the customer multi-item voice
-      // flow (mergeItemIntoList + foldPendingItem) — a size is a fixed
-      // 1-of-5 value, much less prone to mishearing than a name or phone
-      // number, so folding it as usual is fine here.
-      let itemsMerged = state.items || [];
-      for (const it of clean.items || []) itemsMerged = mergeItemIntoList(itemsMerged, it);
-      let newState = {
-        ...state,
-        items: itemsMerged,
-        pending_size: clean.size != null ? clean.size : (state.pending_size ?? null),
-        pending_weight: clean.weight_kg != null ? clean.weight_kg : (state.pending_weight ?? null),
-      };
-      newState = foldPendingItem(newState);
-
-      // Name/phone: fill-only-if-empty. Never overwrites an already-set hub
-      // field — this is what makes it a one-shot fill rather than a
-      // voice-driven correction, per the 2026-07-11 decision.
-      //
-      // BUGFIX (2026-07-12): this used to be gated on `clean.first_name`
-      // being truthy, so a surname-only utterance (e.g. "خانوم ابراهیمی" —
-      // a title + last name, with no given name spoken) got its correctly-
-      // extracted last_name silently discarded, because Gemini rightly left
-      // first_name null rather than guess it. first_name and last_name are
-      // independent fields — accept whichever one(s) came back, each still
-      // fill-only-if-currently-empty.
-      if (!newState.first_name && clean.first_name) {
-        newState.first_name = clean.first_name;
-      }
-      if (!newState.last_name && clean.last_name) {
-        newState.last_name = clean.last_name;
-      }
-      if (!newState.phone_number && clean.phone_number) {
-        newState.phone_number = clean.phone_number;
-      }
-      // shop_name: same fill-only-if-empty rule. Added 2026-07-12 — this is
-      // the field "سوپرمارکت فجر" now lands in (the "فجر" part specifically);
-      // business_type still separately captures the "سوپرمارکت" category.
-      if (!newState.shop_name && clean.shop_name) {
-        newState.shop_name = clean.shop_name;
-      }
-      // business_type: same fill-only-if-empty rule. Added 2026-07-11 after
-      // a report that saying e.g. "سوپرمارکت فجر" got folded entirely into
-      // address with the business type silently dropped — the voice schema
-      // simply didn't have a business_type field to put it in before this.
-      if (!newState.business_type && clean.business_type) {
-        newState.business_type = clean.business_type;
-      }
-      // area: same fill-only-if-empty rule, validated against the current
-      // delivery_areas setting inside sanitizeAdminRegExtraction above.
-      if (!newState.area && clean.area) {
-        newState.area = clean.area;
-      }
-
-      // Address: also fill-only-if-empty, and still runs through the same
-      // admin-only duplicate/similarity catch as typed entry before being
-      // accepted outright — reuses the existing address_dup_confirm step
-      // and addrdup:accept/reject callbacks verbatim, so accepting or
-      // rejecting the match returns to the hub with everything else
-      // (items/name/phone merged above) intact.
-      if (!newState.address && clean.address) {
-        const matches = await findSimilarAddresses(env, clean.address, {
-          threshold: ADDRESS_SIMILARITY_THRESHOLD,
-          limit: 1,
-        });
-        if (matches.length) {
-          const candidate = matches[0];
-          const dupState = {
-            ...newState,
-            step: 'address_dup_confirm',
-            dup_candidate_id: candidate.id,
-            dup_candidate_text: candidate.address,
-            pending_address: clean.address,
-          };
-          await setTgState(env, chatId, dupState);
-          await editMessageText(
-            env,
-            chatId,
-            state.wizard_msg_id,
-            `آیا منظور شما این آدرس است؟\n${escapeHtml(candidate.address)}`,
-            {
-              inline_keyboard: [
-                [
-                  { text: '✅ بله همین است', callback_data: 'addrdup:accept' },
-                  { text: '❌ خیر، جدید است', callback_data: 'addrdup:reject' },
-                ],
-                CANCEL_INLINE_ROW,
-              ],
-            }
-          );
-          return;
-        }
-        newState.address = clean.address;
-      }
-
-      const wizardMsgId = await renderHub(env, chatId, newState);
-      await setTgState(env, chatId, { ...newState, wizard_msg_id: wizardMsgId });
+    if (inRegHub) {
+      await handleHubVoiceMessage(env, chatId, state, message.voice.file_id);
       return;
     }
 
@@ -2501,12 +2508,22 @@ async function handleMessage(env, message) {
     if (!inVoiceOrderFlow) {
       const existing = await findCustomerByChatId(env, chatId);
       if (!existing) {
-        await sendMessage(
-          env,
-          chatId,
-          'برای ثبت سفارش صوتی ابتدا باید یک‌بار به‌عنوان مشتری ثبت‌نام کنید. لطفاً از دکمه زیر استفاده کنید:',
-          await mainMenuKeyboardFor(env, message.from)
-        );
+        // First-ever voice message from someone we don't have a customer
+        // record for — previously this just blocked with a "register first"
+        // message and stopped, forcing them to switch to the button flow
+        // (defeating the point of voice ordering for a brand-new customer).
+        // Instead, start the same self-registration hub the "➕ ثبت سفارش
+        // جدید" button opens for a first-time customer (origin left unset,
+        // same as that button — NOT 'admin_add'), then immediately run this
+        // voice message through it, so one voice note can both register
+        // them (name/phone/address/business type) and start their order
+        // (size/weight) in one go. They still have to tap "✅ ثبت نهایی" on
+        // the hub before anything is actually created.
+        const initialHubState = { step: 'hub', hub_mode: true, items: [] };
+        const hubMsgId = await renderHub(env, chatId, initialHubState);
+        const freshHubState = { ...initialHubState, wizard_msg_id: hubMsgId };
+        await setTgState(env, chatId, freshHubState);
+        await handleHubVoiceMessage(env, chatId, freshHubState, message.voice.file_id);
         return;
       }
       workingState = {
